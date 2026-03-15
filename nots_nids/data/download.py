@@ -19,8 +19,14 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-# ── Kaggle dataset slugs ────────────────────────────────────────────────────
-CICIDS2017_KAGGLE_SLUG = "dhoogla/cicids2017"
+# ── Kaggle dataset slugs (tried in order) ──────────────────────────────────
+# We need the original MachineLearningCSV files with ~78 features and
+# multi-class Label column (BENIGN, DDoS, DoS Hulk, PortScan, etc.)
+CICIDS2017_KAGGLE_SLUGS = [
+    "cicdataset/cicids2017",          # Official CIC upload
+    "chethuhn/network-intrusion-dataset",  # Community mirror (full CSVs)
+    "dhoogla/cicids2017",             # Parquet version (fallback)
+]
 
 
 def ensure_dir(path: str) -> Path:
@@ -52,8 +58,77 @@ def _setup_kaggle_token() -> None:
         pass
 
 
+def _validate_cicids2017_csvs(data_dir: str) -> bool:
+    """Check that CSVs in data_dir look like real CICIDS-2017 (multi-class Label)."""
+    csvs = _find_csvs(data_dir)
+    if not csvs:
+        return False
+    try:
+        import pandas as pd
+        # Read just the header + a few rows from the first CSV
+        sample = pd.read_csv(str(csvs[0]), nrows=5, encoding="utf-8", low_memory=False)
+        sample.columns = sample.columns.str.strip()
+        # Must have a Label column
+        label_col = None
+        for c in sample.columns:
+            if c.lower() == "label":
+                label_col = c
+                break
+        if label_col is None:
+            print(f"  Validation failed: no 'Label' column in {csvs[0].name}")
+            print(f"  Columns found: {list(sample.columns)[:10]}...")
+            return False
+        # Must have at least 40 feature columns (original has ~78)
+        if len(sample.columns) < 40:
+            print(f"  Validation failed: only {len(sample.columns)} columns (need 40+)")
+            return False
+        return True
+    except Exception as e:
+        print(f"  Validation error: {e}")
+        return False
+
+
+def _copy_cache_to_data_dir(cache_path: str, data_dir: str) -> int:
+    """Copy CSV/parquet files from kagglehub cache to data_dir. Returns CSV count."""
+    cache = Path(cache_path)
+    target = Path(data_dir)
+
+    # Try CSVs first
+    cache_csvs = list(cache.rglob("*.csv"))
+    if cache_csvs:
+        for f in cache_csvs:
+            dest = target / f.name
+            if not dest.exists():
+                shutil.copy2(str(f), str(dest))
+        return len(_find_csvs(data_dir))
+
+    # Try parquet -> CSV conversion
+    cache_parquets = list(cache.rglob("*.parquet"))
+    if cache_parquets:
+        print(f"  Found {len(cache_parquets)} parquet files — converting to CSV...")
+        try:
+            import pandas as pd
+        except ImportError:
+            subprocess.check_call(
+                [sys.executable, "-m", "pip", "install", "-q", "pandas", "pyarrow"],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            )
+            import pandas as pd
+        for pq in cache_parquets:
+            dest = target / (pq.stem + ".csv")
+            if not dest.exists():
+                print(f"    {pq.name} -> {dest.name}")
+                pd.read_parquet(str(pq)).to_csv(str(dest), index=False)
+        return len(_find_csvs(data_dir))
+
+    return 0
+
+
 def download_cicids2017_kaggle(data_dir: str = "data/cicids2017") -> str:
     """Download CICIDS-2017 from Kaggle using kagglehub.
+
+    Tries multiple dataset slugs in order. Validates that the downloaded
+    data has the expected multi-class Label column and ~78 features.
 
     Parameters
     ----------
@@ -69,66 +144,55 @@ def download_cicids2017_kaggle(data_dir: str = "data/cicids2017") -> str:
 
     # Install kagglehub if needed
     try:
-        import kagglehub  # noqa: F401
+        import kagglehub
     except ImportError:
         print("Installing kagglehub...")
         subprocess.check_call(
             [sys.executable, "-m", "pip", "install", "-q", "kagglehub"],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         )
-        import kagglehub  # noqa: F811
+        import kagglehub
 
     ensure_dir(data_dir)
 
-    print("Downloading CICIDS-2017 from Kaggle (this may take a few minutes)...")
-
-    # kagglehub downloads to its own cache and returns the path
-    cache_path = kagglehub.dataset_download(CICIDS2017_KAGGLE_SLUG)
-    print(f"Downloaded to cache: {cache_path}")
-
-    target = Path(data_dir)
-
-    # Look for CSVs first
-    cache_csvs = list(Path(cache_path).rglob("*.csv"))
-    if cache_csvs:
-        for csv_file in cache_csvs:
-            dest = target / csv_file.name
-            if not dest.exists():
-                shutil.copy2(str(csv_file), str(dest))
-        csvs = _find_csvs(data_dir)
-        print(f"Dataset ready: {len(csvs)} CSV files in {data_dir}")
-        return data_dir
-
-    # No CSVs — check for parquet files and convert
-    cache_parquets = list(Path(cache_path).rglob("*.parquet"))
-    if cache_parquets:
-        print(f"Found {len(cache_parquets)} parquet files — converting to CSV...")
+    errors = []
+    for slug in CICIDS2017_KAGGLE_SLUGS:
+        print(f"\nTrying Kaggle dataset: {slug}")
         try:
-            import pandas as pd
-        except ImportError:
-            subprocess.check_call(
-                [sys.executable, "-m", "pip", "install", "-q", "pandas", "pyarrow"],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
-            import pandas as pd
-        for pq_file in cache_parquets:
-            csv_name = pq_file.stem + ".csv"
-            dest = target / csv_name
-            if not dest.exists():
-                print(f"  Converting {pq_file.name} -> {csv_name}")
-                pd.read_parquet(str(pq_file)).to_csv(str(dest), index=False)
-        csvs = _find_csvs(data_dir)
-        print(f"Dataset ready: {len(csvs)} CSV files in {data_dir}")
-        return data_dir
+            cache_path = kagglehub.dataset_download(slug)
+            print(f"  Downloaded to: {cache_path}")
 
-    # List what's actually there for debugging
-    all_files = list(Path(cache_path).rglob("*"))
-    file_list = [str(f.relative_to(cache_path)) for f in all_files if f.is_file()]
+            n_csvs = _copy_cache_to_data_dir(cache_path, data_dir)
+            if n_csvs == 0:
+                # List what was actually downloaded for debugging
+                all_files = list(Path(cache_path).rglob("*"))
+                exts = set(f.suffix for f in all_files if f.is_file())
+                print(f"  No CSV/parquet found. File types: {exts}")
+                errors.append(f"{slug}: no CSV/parquet files")
+                continue
+
+            if _validate_cicids2017_csvs(data_dir):
+                csvs = _find_csvs(data_dir)
+                print(f"Dataset ready: {len(csvs)} CSV files in {data_dir}")
+                return data_dir
+
+            # Validation failed — clean up and try next slug
+            print(f"  Dataset from {slug} doesn't match expected CICIDS-2017 format")
+            for f in _find_csvs(data_dir):
+                f.unlink()
+            errors.append(f"{slug}: validation failed (wrong format)")
+
+        except Exception as e:
+            print(f"  Failed: {e}")
+            errors.append(f"{slug}: {e}")
+
     raise FileNotFoundError(
-        f"No CSV or parquet files found in kagglehub cache at {cache_path}. "
-        f"Files found ({len(file_list)}): {file_list[:20]}"
+        f"Could not download valid CICIDS-2017 from any Kaggle source.\n"
+        f"Errors: {errors}\n\n"
+        f"Please download manually:\n"
+        f"  1. Go to https://www.kaggle.com and search 'CICIDS 2017'\n"
+        f"  2. Download the dataset with MachineLearningCSV files (~8 CSVs, ~78 features)\n"
+        f"  3. Extract CSVs into: {data_dir}\n"
     )
 
 
