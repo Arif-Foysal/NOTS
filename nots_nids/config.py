@@ -19,8 +19,8 @@ class Config:
     RANDOM_SEED: int = 42
 
     # ── Windowing ────────────────────────────────────────────────────────
-    WINDOW_SIZE: int = 500           # N flows per point cloud
-    WINDOW_STEP: int = 250           # 50 % overlap by default
+    WINDOW_SIZE: int = 100           # N flows per point cloud
+    WINDOW_STEP: int = 50            # 50 % overlap by default
 
     # ── Projection (R^d → R^k) ──────────────────────────────────────────
     # "pca" = Lipschitz-bounded (provable stability),
@@ -41,7 +41,7 @@ class Config:
     # In real networks, protocol-constrained features (TCP flags, ports)
     # cannot be freely perturbed — only timing/size features can.
     PERTURBABLE_FEATURES: Optional[List[int]] = None
-    MAX_ATTACK_WINDOWS: int = 200    # Increased from 50 for statistical power
+    MAX_ATTACK_WINDOWS: int = 100    # Cap for attack windows in experiments
 
     # ── Adaptive Baseline (EWM) ──────────────────────────────────────────
     ALPHA_EWM: float = 0.05
@@ -65,10 +65,10 @@ class Config:
 
     # ── Feature Selection ────────────────────────────────────────────────
     FEATURE_COLS: Optional[List[str]] = None   # None → auto-detect numerics
-    N_FEATURE_SUBSETS: int = 20                # Feature subsets in Nash LP
+    N_FEATURE_SUBSETS: int = 8                 # Feature subsets in Nash LP
 
     # ── Baseline Builder ─────────────────────────────────────────────────
-    N_BASELINE_WINDOWS: int = 50
+    N_BASELINE_WINDOWS: int = 20
 
     # ── Kitsune Baseline ─────────────────────────────────────────────────
     KITSUNE_N_CLUSTERS: int = 10
@@ -80,15 +80,15 @@ class Config:
     FGSM_H: float = 1e-4             # Numerical gradient step
 
     # ── Efficiency Benchmark ─────────────────────────────────────────────
-    BENCHMARK_N_VALUES: List[int] = field(default_factory=lambda: [100, 500, 1000])
-    BENCHMARK_N_REPEATS: int = 100
+    BENCHMARK_N_VALUES: List[int] = field(default_factory=lambda: [50, 100, 500])
+    BENCHMARK_N_REPEATS: int = 30
 
     # ── Multi-run (confidence intervals) ─────────────────────────────────
-    N_EXPERIMENT_RUNS: int = 5       # Run each exp N times with different seeds
+    N_EXPERIMENT_RUNS: int = 3       # Run each exp N times with different seeds
 
     # ── Sensitivity Analysis ─────────────────────────────────────────────
     SENSITIVITY_WINDOW_SIZES: List[int] = field(
-        default_factory=lambda: [100, 250, 500, 1000]
+        default_factory=lambda: [50, 100, 250]
     )
     SENSITIVITY_N_COMPONENTS: List[int] = field(
         default_factory=lambda: [3, 5, 10]

@@ -219,12 +219,12 @@ class NOTSDetector:
         """
         n_features = attack_windows[0]["points"].shape[1]
         n_subsets = len(subset_indices)
-        n_sample = min(10, len(attack_windows))
+        n_sample = min(5, len(attack_windows))
         delta_max = max(self.config.DELTA_VALUES)
         perturbable = self.config.PERTURBABLE_FEATURES or list(range(n_features))
 
         # Generate K attacker perturbation directions per category
-        K = 5
+        K = 3
 
         # Category 1: Random directions
         random_dirs = []
